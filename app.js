@@ -2,6 +2,11 @@ const express = require('express');
 const app = express();
 const port = 3000;
 
+//Database
+var pgp = require('pg-promise')(/* options */);
+var db = pgp('postgres://postgres:postgres@localhost:5432/roommate-app');
+const PQ = require('pg-promise').ParameterizedQuery;
+
 //Body Parser
 var bodyParser = require('body-parser')
 app.use( bodyParser.json() );       // to support JSON-encoded bodies
@@ -12,46 +17,43 @@ app.use(bodyParser.urlencoded({     // to support URL-encoded bodies
 //CORS
 var cors = require('cors');
 app.use(cors());
-//Authentication
-var passport = require('passport'),
-  LocalStrategy = require('passport-local').Strategy,
-  session = require("express-session"),
-  bodyParser = require("body-parser");
 
-app.use(express.static("public"));
-app.use(session({ secret: "no-mangoes-here" }));
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(passport.initialize());
-app.use(passport.session());
+//Bcrypt
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
-passport.use(new LocalStrategy(
-  function(username, password, done) {
-    User.findOne({ username: username }, function (err, user) {
-      if (err) { return done(err); }
-      if (!user) {
-        return done(null, false, { message: 'Incorrect username.' });
+//For JWT Authentication
+const jwt = require('jsonwebtoken');
+//TODO: terrible practice lmao
+const secret = 'no-more-mangoes';
+
+//Check if the user if authorized for all /api/* paths
+app.use('/api/*', (req, res, next) => {
+  if(!req.headers.authorization) {
+    res.status(401).send('No auth header present');
+  } else {
+    //Check the auth token to see if it's valid
+    jwt.verify(req.headers.authorization, secret, function(err, decoded) {
+      if(err) {
+        res.status(401).json(err);
+      } else {
+        console.log(decoded);
+        //Do something?
+        next();
       }
-      if (!user.validPassword(password)) {
-        return done(null, false, { message: 'Incorrect password.' });
-      }
-      return done(null, user);
     });
   }
-));
+});
 
-//Database
-var pgp = require('pg-promise')(/* options */);
-var db = pgp('postgres://postgres:postgres@localhost:5432/roommate-app');
-const PQ = require('pg-promise').ParameterizedQuery;
-
-//Homepage
-app.get('/', (req, res) => res.send('Hello World!'));
+app.get('/api/me', (req, res, next) => {
+  console.log('yeet?');
+  res.send('Made it');
+});
 
 // ======================== Users ===========================//
+
+//TODO: implement this
 app.get('/user/:userId', (req, res) => {
-  //console.log(req);
-  //TODO: get the user from the database if they exist and return it
-  //console.log(db);
   db.one('SELECT $1 AS value', 123)
   .then(function (data) {
     console.log('DATA:', data.value);
@@ -61,25 +63,23 @@ app.get('/user/:userId', (req, res) => {
     console.log('ERROR:', error)
     res.send(error);
   });
-
-  //res.send('Requesting user');
 });
 
 //User creation
 app.post('/user', (req, res, next) => {
-  //console.log(req);
-  const insertUser = new PQ({text: 'INSERT into app_user (email, password_hash) VALUES ($1, $2)', values: [req.body.email, req.body.password]});
+  //TODO: Validate the submitted JSON data here...
 
-  db.any(insertUser)
+  //Hash the password
+  bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
+    const insertUser = new PQ({text: 'INSERT into app_user (email, password_hash) VALUES ($1, $2)', values: [req.body.email, hash]});
+    db.any(insertUser)
     .then(db_res => {
-      //console.log(res);
       res.sendStatus(201);
     })
     .catch(err => {
-      //console.log(err);
       next(err);
-      //res.sendStatus(409);
     });
+  });
 });
 
 app.get('/users', (req, res, next) => {
@@ -87,12 +87,34 @@ app.get('/users', (req, res, next) => {
 
   db.manyOrNone(userQuery)
     .then(db_res => {
-      //Get the data, put it in the appropriate json format
-      //console.log(db_res);
+      //TODO: restrict which fields to return
       res.json(db_res);
     }).catch(err => {
       next(err);
     });
 });
+
+app.post('/authenticate', (req, res, next) => {
+  //TODO: validate the req JSON first
+
+  const getUser = new PQ({text: "SELECT * from app_user WHERE email = $1", values: [req.body.email]});
+
+  db.one(getUser)
+    .then(async user => {
+      const match = await bcrypt.compare(req.body.password, user.password_hash);
+      if(match) {
+        //Return a json web token if password is right
+        //Token doesn't expire. TODO?: expire token.
+        const token = jwt.sign({ id: user.id, email: user.email }, secret);
+        res.json({authorization: token});
+      } else {
+        //Password doesn't match
+        res.status(401).send('Invalid username or password');
+      }
+    }).catch(err => {
+      //Can't find user or other error
+      next(err);
+    });
+})
 
 app.listen(port, () => console.log(`Example app listening on port ${port}!`));
