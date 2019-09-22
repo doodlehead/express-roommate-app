@@ -1,6 +1,6 @@
 const express = require('express');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 //Database
 var pgp = require('pg-promise')(/* options */);
@@ -45,6 +45,7 @@ app.use('/api/*', (req, res, next) => {
   }
 });
 
+//TODO: Check the Authorization header if the user matches. If yes return the data.
 app.get('/api/me', (req, res, next) => {
   console.log('yeet?');
   res.send('Made it');
