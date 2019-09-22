@@ -4,7 +4,7 @@ const port = process.env.PORT || 3000;
 
 //Database
 var pgp = require('pg-promise')(/* options */);
-var db = pgp('postgres://postgres:postgres@localhost:5432/roommate-app');
+var db = pgp(process.env.DATABASE_URL);
 const PQ = require('pg-promise').ParameterizedQuery;
 
 //Body Parser
