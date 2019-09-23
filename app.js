@@ -2,6 +2,10 @@ const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
 
+//Deployment
+const dotenv = require('dotenv');
+dotenv.config({path: '.env.local'});
+
 //Database
 var pgp = require('pg-promise')(/* options */);
 var db = pgp(process.env.DATABASE_URL);
@@ -24,8 +28,7 @@ const saltRounds = 10;
 
 //For JWT Authentication
 const jwt = require('jsonwebtoken');
-//TODO: terrible practice lmao
-const secret = 'no-more-mangoes';
+const secret = process.env.SECRET;
 
 //Check if the user if authorized for all /api/* paths
 app.use('/api/*', (req, res, next) => {
@@ -37,18 +40,28 @@ app.use('/api/*', (req, res, next) => {
       if(err) {
         res.status(401).json(err);
       } else {
-        console.log(decoded);
-        //Do something?
+        req.currentUser = decoded; //Put the user stuff in the req
         next();
       }
     });
   }
 });
 
-//TODO: Check the Authorization header if the user matches. If yes return the data.
 app.get('/api/me', (req, res, next) => {
-  console.log('yeet?');
-  res.send('Made it');
+  //TODO: Check the Authorization header if the user matches. If yes return the data.
+
+  const query = new PQ({
+    text: 'SELECT user_id, email, first_name, last_name FROM app_user WHERE user_id = $1;',
+    values: [req.currentUser.user_id]
+  });
+
+  db.one(query)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      console.log(err);
+      next(err);
+    });
 });
 
 // ======================== Users ===========================//
@@ -72,7 +85,10 @@ app.post('/user', (req, res, next) => {
 
   //Hash the password
   bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
-    const insertUser = new PQ({text: 'INSERT into app_user (email, password_hash) VALUES ($1, $2)', values: [req.body.email, hash]});
+    const insertUser = new PQ({
+      text: 'INSERT into app_user (email, password_hash, first_name, last_name) VALUES ($1, $2, $3, $4)',
+      values: [req.body.email, hash, req.body.firstName, req.body.lastName]
+    });
     db.any(insertUser)
     .then(db_res => {
       res.sendStatus(201);
@@ -83,7 +99,7 @@ app.post('/user', (req, res, next) => {
   });
 });
 
-app.get('/users', (req, res, next) => {
+app.get('/api/users', (req, res, next) => {
   const userQuery = new PQ({text: 'SELECT * from app_user', values: []});
 
   db.manyOrNone(userQuery)
@@ -95,10 +111,68 @@ app.get('/users', (req, res, next) => {
     });
 });
 
+//================ GROUPS ===================//
+app.post('/api/group', (req, res, next) => {
+  const query = new PQ({
+    text: 'INSERT INTO user_group (group_name, group_admin) VALUES($1, $2) RETURNING group_id;',
+    values: [req.body.groupName, req.currentUser.user_id]
+  });
+  //Is any() the best one to use here?
+  db.any(query)
+    .then(db_res => {
+      //TODO: transaction here. All or nothing
+      const queryBelongs = new PQ({
+        text: 'INSERT INTO belongs_to VALUES($1, $2);',
+        values: [req.currentUser.user_id, db_res.pop().group_id]
+      });
+
+      db.any(queryBelongs)
+        .then(db_res2 => {
+          res.sendStatus(201);
+        }).catch(err => {
+          console.log(err);
+          next(err);
+        })
+    }).catch(err => {
+      console.log(err);
+      next(err);
+    });
+});
+//Get the groups the user is in
+app.get('/api/groups', (req, res, next) => {
+  const query = new PQ({
+    text: 'SELECT * FROM user_group WHERE group_id IN '
+            + '(SELECT group_id FROM belongs_to WHERE user_id = $1);', values: [req.currentUser.user_id]});
+
+  db.manyOrNone(query)
+    .then(db_res => {
+      //console.log(db_res);
+      res.json(db_res);
+    }).catch(err => {
+      console.log(err);
+    });
+});
+//Get a particular group's info
+app.get('/api/group/:groupId', (req, res, next) => {
+  const query = new PQ({
+    text: 'SELECT * FROM user_group WHERE group_id = $1;',
+    values: [req.params.groupId]
+  });
+
+  db.one(query)
+    .then(db_res => {
+      res.json(db_res);
+
+    }).catch(err => {
+      console.log(err);
+      next(err);
+    });
+})
+
+//=============== AUTH ================//
 app.post('/authenticate', (req, res, next) => {
   //TODO: validate the req JSON first
-
-  const getUser = new PQ({text: "SELECT * from app_user WHERE email = $1", values: [req.body.email]});
+  const getUser = new PQ({text: "SELECT * FROM app_user WHERE email = $1", values: [req.body.email]});
 
   db.one(getUser)
     .then(async user => {
@@ -106,7 +180,7 @@ app.post('/authenticate', (req, res, next) => {
       if(match) {
         //Return a json web token if password is right
         //Token doesn't expire. TODO?: expire token.
-        const token = jwt.sign({ id: user.id, email: user.email }, secret);
+        const token = jwt.sign({ user_id: user.user_id, email: user.email }, secret);
         res.json({authorization: token});
       } else {
         //Password doesn't match
@@ -117,5 +191,6 @@ app.post('/authenticate', (req, res, next) => {
       next(err);
     });
 })
+
 
 app.listen(port, () => console.log(`Example app listening on port ${port}!`));
