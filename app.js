@@ -64,18 +64,22 @@ app.get('/api/me', (req, res, next) => {
     });
 });
 
-// ======================== Users ===========================//
+// ======================== USERS ===========================//
 
-//TODO: implement this
-app.get('/user/:userId', (req, res) => {
-  db.one('SELECT $1 AS value', 123)
-  .then(function (data) {
-    console.log('DATA:', data.value);
-    res.send(data);
+//Get a User's data
+app.get('/user/:userId', (req, res, next) => {
+  const query = new PQ({
+    text: 'SELECT user_id, email, first_name, last_name FROM app_user WHERE user_id = $1',
+    values: [req.params.userId]
+  });
+
+  db.one(query)
+  .then(db_res => {
+    res.json(db_res);
   })
-  .catch(function (error) {
-    console.log('ERROR:', error)
-    res.send(error);
+  .catch(err => {
+    console.error(err);
+    next(err);
   });
 });
 
@@ -94,13 +98,18 @@ app.post('/user', (req, res, next) => {
       res.sendStatus(201);
     })
     .catch(err => {
-      next(err);
+      //Duplicate Email
+      if(err.code == 23505) {
+        res.status(409).send("User with that email already exists.");
+      } else {
+        next(err);
+      }
     });
   });
 });
-
+//Get user list
 app.get('/api/users', (req, res, next) => {
-  const userQuery = new PQ({text: 'SELECT * from app_user', values: []});
+  const userQuery = new PQ({text: 'SELECT user_id, email, first_name, last_name from app_user', values: []});
 
   db.manyOrNone(userQuery)
     .then(db_res => {
@@ -111,7 +120,8 @@ app.get('/api/users', (req, res, next) => {
     });
 });
 
-//================ GROUPS ===================//
+//====================== GROUPS ========================//
+//Create a new group
 app.post('/api/group', (req, res, next) => {
   const query = new PQ({
     text: 'INSERT INTO user_group (group_name, group_admin) VALUES($1, $2) RETURNING group_id;',
@@ -123,7 +133,7 @@ app.post('/api/group', (req, res, next) => {
       //TODO: transaction here. All or nothing
       const queryBelongs = new PQ({
         text: 'INSERT INTO belongs_to VALUES($1, $2);',
-        values: [req.currentUser.user_id, db_res.pop().group_id]
+        values: [req.currentUser.user_id, db_res[0].group_id]
       });
 
       db.any(queryBelongs)
@@ -142,7 +152,9 @@ app.post('/api/group', (req, res, next) => {
 app.get('/api/groups', (req, res, next) => {
   const query = new PQ({
     text: 'SELECT * FROM user_group WHERE group_id IN '
-            + '(SELECT group_id FROM belongs_to WHERE user_id = $1);', values: [req.currentUser.user_id]});
+            + '(SELECT group_id FROM belongs_to WHERE user_id = $1);',
+    values: [req.currentUser.user_id]
+  });
 
   db.manyOrNone(query)
     .then(db_res => {
@@ -152,6 +164,7 @@ app.get('/api/groups', (req, res, next) => {
       console.log(err);
     });
 });
+
 //Get a particular group's info
 app.get('/api/group/:groupId', (req, res, next) => {
   const query = new PQ({
@@ -162,16 +175,84 @@ app.get('/api/group/:groupId', (req, res, next) => {
   db.one(query)
     .then(db_res => {
       res.json(db_res);
-
     }).catch(err => {
       console.log(err);
       next(err);
     });
 })
+//TODO: Define this in a helper file?
+function getGroupUsers(groupId) {
+  const q = new PQ('SELECT * FROM app_user WHERE user_id IN ' +
+                            '(SELECT user_id FROM belongs_to WHERE group_id = $1);');
 
-//=============== AUTH ================//
+  return db.query(q, [groupId]);
+}
+app.get('/api/group/:groupId/users', (req, res, next) => {
+  getGroupUsers(req.params.groupId)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      next(err);
+    });
+});
+
+//Add Users to a group
+app.post('/api/group/:groupId/addUsers', async (req, res, next) => {
+  if(!req.body.users) {
+    res.status(400).send("No users provided");
+  }
+
+  const q = new PQ('INSERT INTO belongs_to (user_id, group_id) VALUES ($1, $2);');
+
+  //TODO: make this a transaction
+  for(let user_id of req.body.users) {
+    try {
+      let db_res = await db.query(q, [user_id, req.params.groupId]);
+    } catch(err) {
+      next(err);
+    }
+  }
+  //Get the group data and send it back...
+
+  getGroupUsers(req.params.groupId)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      next(err);
+    });
+});
+//Remove users from group
+app.delete('/api/group/:groupId/user', (req, res, next) => {
+  if(!req.body.userId) {
+    res.status(400).send("No userId provided");
+  }
+
+  const q = new PQ({
+    text: 'DELETE FROM belongs_to WHERE user_id = $1 AND group_id = $2;',
+    values: [req.body.userId, req.params.groupId]
+  });
+
+  //Return the remaning group members
+  db.query(q)
+    .then(db_res => {
+      getGroupUsers(req.params.groupId)
+        .then(db_res => {
+          res.json(db_res);
+        }).catch(err => {
+          next(err);
+        });
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    });
+});
+
+//======================== AUTH ========================//
 app.post('/authenticate', (req, res, next) => {
-  //TODO: validate the req JSON first
+  if(!req.body.email || !req.body.password) {
+    res.status(400).send('Username or password missing');
+  }
+
   const getUser = new PQ({text: "SELECT * FROM app_user WHERE email = $1", values: [req.body.email]});
 
   db.one(getUser)
