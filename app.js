@@ -247,6 +247,101 @@ app.delete('/api/group/:groupId/user', (req, res, next) => {
     });
 });
 
+//============================== Calendar ===========================//
+//Create Calendar
+app.post('/api/calendar', (req, res, next) => {
+  if(!req.body.name) {
+    res.status(400).send("No name provided");
+  }
+
+  const query = new PQ({
+    text: 'INSERT INTO calendar (user_id, calendar_name) VALUES ($1, $2);',
+    values: [req.currentUser.user_id, req.body.name]
+  });
+
+  db.any(query)
+    .then(db_res => {
+      res.sendStatus(200);
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    });
+});
+//Get a list of calendar ids
+app.get('/api/calendars', (req, res, next) => {
+  const query = new PQ({
+    text: 'SELECT * FROM calendar WHERE user_id = $1;',
+    values: [req.currentUser.user_id]
+  });
+
+  db.any(query)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    })
+});
+//Get a calendar and its events
+app.get('/api/calendar/:calendarId', async (req, res, next) => {
+  const query = new PQ({
+    text: 'SELECT * FROM calendar WHERE calendar_id = $1;',
+    values: [req.params.calendarId]
+  });
+
+  const eventQuery = new PQ({
+    text: 'SELECT * FROM calendar_event WHERE calendar_id = $1;',
+    values: [req.params.calendarId]
+  });
+
+  try {
+    let calendarRes = await db.one(query);
+    let eventList = await db.any(eventQuery);
+
+    res.json({
+      name: calendarRes.calendar_name,
+      events: eventList
+    });
+
+  } catch(err) {
+    console.error(err);
+    next(err);
+  }
+
+});
+
+//Create a new event
+app.post('/api/calendar/:calendarId/event', (req, res, next) => {
+  //TODO: authenticate the payload
+
+  const query = new PQ({
+    text: 'INSERT INTO calendar_event (event_name, calendar_id, start_time, end_time, start_date, end_date, recurring) '
+          + 'VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;',
+    values: [req.body.name, req.params.calendarId, req.body.startTime, req.body.endTime, req.body.startDate,
+              req.body.endDate, req.body.recurring]
+  });
+
+  db.one(query)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    });
+
+});
+//Modify event
+app.post('/api/calendar/:calendarId/event/:eventId', (req, res, next) => {
+  //TODO: Authenticate payload
+
+  const query = new PQ({
+    text: 'UPDATE calendar_event SET event_name = $1, start_time = $2, end_time = $3, '
+      + 'start_date = $4, end_date = $5, recurring = $6 WHERE event_id = $7;',
+    values: []
+  });
+})
+
+
 //======================== AUTH ========================//
 app.post('/authenticate', (req, res, next) => {
   if(!req.body.email || !req.body.password) {
