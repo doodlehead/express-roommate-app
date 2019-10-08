@@ -312,16 +312,20 @@ app.get('/api/calendar/:calendarId', async (req, res, next) => {
 
 //Create a new event
 app.post('/api/calendar/:calendarId/event', (req, res, next) => {
-  //TODO: authenticate the payload
+  //TODO: validate the payload
 
-  const query = new PQ({
-    text: 'INSERT INTO calendar_event (event_name, calendar_id, start_time, end_time, start_date, end_date, recurring) '
-          + 'VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;',
-    values: [req.body.name, req.params.calendarId, req.body.startTime, req.body.endTime, req.body.startDate,
-              req.body.endDate, req.body.recurring]
-  });
-
-  db.one(query)
+  db.one('INSERT INTO calendar_event (event_name, calendar_id, start_time, end_time, start_date, end_date, recurring, description, event_importance) '
+      + 'VALUES (${name}, ${calendarId}, ${startTime}, ${endTime}, ${startDate}, ${endDate}, ${recurring}, ${description}, ${eventImportance}) RETURNING *;', {
+        name: req.body.name,
+        calendarId: req.body.calendarId,
+        startTime: req.body.startTime,
+        endTime: req.body.endTime,
+        startDate: req.body.startDate,
+        endDate: req.body.endDate,
+        recurring: req.body.recurring,
+        description: req.body.description,
+        eventImportance: req.body.eventImportance
+    })
     .then(db_res => {
       res.json(db_res);
     }).catch(err => {
@@ -331,16 +335,39 @@ app.post('/api/calendar/:calendarId/event', (req, res, next) => {
 
 });
 //Modify event
-app.post('/api/calendar/:calendarId/event/:eventId', (req, res, next) => {
-  //TODO: Authenticate payload
+app.put('/api/calendar/:calendarId/event/:eventId', (req, res, next) => {
+  //TODO: validate payload
 
   const query = new PQ({
     text: 'UPDATE calendar_event SET event_name = $1, start_time = $2, end_time = $3, '
-      + 'start_date = $4, end_date = $5, recurring = $6 WHERE event_id = $7;',
-    values: []
+      + 'start_date = $4, end_date = $5, eventImportance = $6, recurring = $7 WHERE event_id = $8 RETURNING *;',
+    values: [req.body.name, req.body.startTime, req.body.endTime, req.body.startDate,
+      req.body.endDate, req.body.eventImportance, req.body.recurring, req.params.eventId]
   });
-})
 
+  db.one(query)
+    .then(db_res => {
+      res.json(db_res);
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    })
+});
+//Delete event
+app.delete('/api/calendar/:calendarId/event/:eventId', (req, res, next) => {
+  const query = new PQ({
+    text: 'DELETE FROM calendar_event WHERE event_id = $1;',
+    values: [req.params.eventId]
+  });
+
+  db.query(query)
+    .then(db_res => {
+      res.sendStatus(200);
+    }).catch(err => {
+      console.error(err);
+      next(err);
+    });
+});
 
 //======================== AUTH ========================//
 app.post('/authenticate', (req, res, next) => {

@@ -27,21 +27,26 @@ CREATE TABLE belongs_to (
 DROP TABLE IF EXISTS calendar CASCADE;
 CREATE TABLE calendar (
   calendar_ID SERIAL PRIMARY KEY,
-  user_ID INT REFERENCES app_user(user_ID),
+  user_ID INT REFERENCES app_user(user_ID) NOT NULL,
   calendar_name VARCHAR(64) NOT NULL CHECK (calendar_name <> '')
 );
+-- Event importance enum
+DROP TYPE IF EXISTS importance;
+CREATE TYPE importance AS ENUM ('trivial', 'minor', 'major', 'critical');
+
 -- Calendar Event
 DROP TABLE IF EXISTS calendar_event CASCADE;
 CREATE TABLE calendar_event (
   event_ID SERIAL PRIMARY KEY,
   event_name VARCHAR(64),
-  calendar_ID INT REFERENCES calendar(calendar_ID),
+  calendar_ID INT REFERENCES calendar(calendar_ID) NOT NULL,
   start_time TIME(0) NOT NULL,
   end_time TIME(0) NOT NULL,
   start_date DATE,
   end_date DATE,
   recurring BOOLEAN,
   description VARCHAR(200),
+  event_importance importance NOT NULL,
 
   constraint recurring_check CHECK
   (
