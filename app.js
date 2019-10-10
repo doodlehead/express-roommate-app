@@ -310,6 +310,16 @@ app.get('/api/calendar/:calendarId', async (req, res, next) => {
 
 });
 
+app.delete('/api/calendar/:calendarId', (req, res, next) => {
+  db.query('DELETE FROM calendar WHERE calendar_id = ${calendarId}', {
+    calendarId: req.params.calendarId
+  }).then(db_res => {
+    res.sendStatus(200);
+  }).catch(err => {
+    console.error(err);
+    next(err);
+  });
+});
 //Create a new event
 app.post('/api/calendar/:calendarId/event', (req, res, next) => {
   //TODO: validate the payload
@@ -338,14 +348,19 @@ app.post('/api/calendar/:calendarId/event', (req, res, next) => {
 app.put('/api/calendar/:calendarId/event/:eventId', (req, res, next) => {
   //TODO: validate payload
 
-  const query = new PQ({
-    text: 'UPDATE calendar_event SET event_name = $1, start_time = $2, end_time = $3, '
-      + 'start_date = $4, end_date = $5, eventImportance = $6, recurring = $7 WHERE event_id = $8 RETURNING *;',
-    values: [req.body.name, req.body.startTime, req.body.endTime, req.body.startDate,
-      req.body.endDate, req.body.eventImportance, req.body.recurring, req.params.eventId]
-  });
-
-  db.one(query)
+  db.one('UPDATE calendar_event SET event_name = ${name}, start_time = ${startTime}, end_time = ${endTime}, '
+  + 'start_date = ${startDate}, end_date = ${endDate}, description = ${description}, event_importance = ${eventImportance}, recurring = ${recurring} '
+  + 'WHERE event_id = ${eventId} RETURNING *;', {
+    name: req.body.name,
+    startTime: req.body.startTime,
+    endTime: req.body.endTime,
+    startDate: req.body.startDate,
+    endDate: req.body.endDate,
+    description: req.body.description,
+    eventImportance: req.body.eventImportance,
+    recurring: req.body.recurring,
+    eventId: req.params.eventId
+  })
     .then(db_res => {
       res.json(db_res);
     }).catch(err => {
