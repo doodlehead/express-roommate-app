@@ -67,7 +67,7 @@ app.get('/api/me', (req, res, next) => {
 // ======================== USERS ===========================//
 
 //Get a User's data
-app.get('/user/:userId', (req, res, next) => {
+app.get('/api/user/:userId', (req, res, next) => {
   const query = new PQ({
     text: 'SELECT user_id, email, first_name, last_name FROM app_user WHERE user_id = $1',
     values: [req.params.userId]
@@ -84,7 +84,7 @@ app.get('/user/:userId', (req, res, next) => {
 });
 
 //User creation
-app.post('/user', (req, res, next) => {
+app.post('/api/user', (req, res, next) => {
   //TODO: Validate the submitted JSON data here...
 
   //Hash the password
@@ -197,7 +197,7 @@ app.get('/api/group/:groupId/users', (req, res, next) => {
 });
 
 //Add Users to a group
-app.post('/api/group/:groupId/addUsers', async (req, res, next) => {
+app.post('/api/group/:groupId/user', async (req, res, next) => {
   if(!req.body.users) {
     res.status(400).send("No users provided");
   }
@@ -245,6 +245,30 @@ app.delete('/api/group/:groupId/user', (req, res, next) => {
       console.error(err);
       next(err);
     });
+});
+
+//Get all events that belong to a group
+app.get('/api/group/:groupId/events', (req, res, next) => {
+  //Get all the ID of users in the group
+  const eventsQuery = new PQ({
+    text:
+    `SELECT * FROM
+    (SELECT user_id FROM belongs_to where group_id = $1) as T1
+    JOIN calendar
+    ON T1.user_id = calendar.user_id
+    JOIN calendar_event
+    ON calendar.calendar_id = calendar_event.calendar_id;`,
+    values: [req.params.groupId]
+  })
+
+  db.query(eventsQuery)
+    .then(db_res => {
+      res.json(db_res);
+    })
+    .catch(err => {
+      console.error(err);
+      next(err);
+    })
 });
 
 //============================== Calendar ===========================//
@@ -406,7 +430,11 @@ app.post('/authenticate', (req, res, next) => {
       }
     }).catch(err => {
       //Can't find user or other error
-      next(err);
+      if(err.message) {
+        res.status(401).send(err.message);
+      } else {
+        next(err);
+      }
     });
 })
 
